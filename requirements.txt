@@ -1,4 +1,5 @@
 streamlit
-matplot
+pandas
+matplotlib
 seaborn
-zscore
+scipy
