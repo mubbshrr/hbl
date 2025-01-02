@@ -1,123 +1,63 @@
-import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-from scipy.stats import zscore
+import numpy as np
 
-# Load the data
-data_path = 'Enhanced_Dummy_HBL_Data(1).csv'  # Update with the correct file path
-df = pd.read_csv(data_path)
+file_path = '/mnt/data/Enhanced_Dummy_HBL_Data(1).csv'
+data = pd.read_csv(file_path)
 
-# Title for the dashboard
-st.title("Interactive Dashboard for Transaction Data")
+account_type_distribution = data['Account Type'].value_counts(normalize=True)
+plt.figure(figsize=(8, 6))
+account_type_distribution.plot.pie(autopct='%1.1f%%', startangle=90, colors=plt.cm.Paired.colors)
+plt.title('Distribution of Account Types')
+plt.ylabel('')
+plt.show()
 
-# Sidebar for navigation
-st.sidebar.title("Navigation")
-options = st.sidebar.radio(
-    "Select a Visualization:",
-    (
-        "Account Type Distribution",
-        "Transaction Flow by Beneficiary Bank",
-        "Geographic Heatmap of Transactions",
-        "Anomalies in Transactions",
-        "Comparative Analysis of Transaction Types",
-    ),
-)
+transaction_flow = data.groupby(['Region', 'Transaction To'])['Credit'].sum().reset_index()
+top_beneficiary_banks = transaction_flow.groupby('Region').apply(
+    lambda x: x.nlargest(5, 'Credit')).reset_index(drop=True)
 
-if options == "Account Type Distribution":
-    st.header("Account Type Distribution")
-    account_type_distribution = df['Account Type'].value_counts()
+plt.figure(figsize=(12, 8))
+sns.barplot(data=top_beneficiary_banks, x='Region', y='Credit', hue='Transaction To')
+plt.title('Top 5 Beneficiary Banks by Region (Credit Transactions)')
+plt.ylabel('Credit Amount')
+plt.xticks(rotation=45)
+plt.legend(title='Beneficiary Bank', bbox_to_anchor=(1.05, 1), loc='upper left')
+plt.tight_layout()
+plt.show()
 
-    # Plot the pie chart
-    fig, ax = plt.subplots(figsize=(8, 8))
-    account_type_distribution.plot.pie(
-        autopct='%1.1f%%', startangle=140, colors=plt.cm.Paired.colors, ax=ax
-    )
-    ax.set_title("Account Type Distribution")
-    ax.set_ylabel('')
-    st.pyplot(fig)
+transaction_intensity = data.groupby('Region')[['Credit', 'Debit']].sum().reset_index()
+transaction_intensity['Total'] = transaction_intensity['Credit'] + transaction_intensity['Debit']
 
-elif options == "Transaction Flow by Beneficiary Bank":
-    st.header("Top 5 Beneficiary Banks by Region")
-    # Group and sort data
-    top_beneficiary_banks = (
-        df.groupby(['Region', 'Transaction To'])['Credit']
-        .sum()
-        .reset_index()
-        .sort_values(by='Credit', ascending=False)
-    )
-    top_5_per_region = top_beneficiary_banks.groupby('Region').head(5)
+plt.figure(figsize=(10, 6))
+sns.heatmap(transaction_intensity.set_index('Region')[['Credit', 'Debit']], annot=True, fmt=".2f", cmap='Blues')
+plt.title('Geographic Heatmap of Transaction Intensity')
+plt.ylabel('Region')
+plt.tight_layout()
+plt.show()
 
-    # Plot the bar chart
-    fig, ax = plt.subplots(figsize=(12, 6))
-    for region in top_5_per_region['Region'].unique():
-        region_data = top_5_per_region[top_5_per_region['Region'] == region]
-        ax.bar(region_data['Transaction To'], region_data['Credit'], label=region)
+data['Credit_Z'] = (data['Credit'] - data['Credit'].mean()) / data['Credit'].std()
+data['Debit_Z'] = (data['Debit'] - data['Debit'].mean()) / data['Debit'].std()
 
-    ax.set_title("Top 5 Beneficiary Banks with Highest Credit Transactions by Region")
-    ax.set_xlabel("Beneficiary Bank")
-    ax.set_ylabel("Total Credit (in currency units)")
-    ax.legend(title="Region")
-    plt.xticks(rotation=45, ha='right')
-    st.pyplot(fig)
+anomalies = data[(data['Credit_Z'].abs() > 3) | (data['Debit_Z'].abs() > 3)]
 
-elif options == "Geographic Heatmap of Transactions":
-    st.header("Geographic Heatmap of Transactions")
-    # Aggregate transaction intensity
-    transaction_intensity = df.groupby('Region')[['Credit', 'Debit']].sum().reset_index()
-    transaction_intensity['Total Transactions'] = (
-        transaction_intensity['Credit'] + transaction_intensity['Debit']
-    )
+plt.figure(figsize=(10, 6))
+sns.scatterplot(data=data, x='Credit', y='Debit', alpha=0.5, label='Normal')
+sns.scatterplot(data=anomalies, x='Credit', y='Debit', color='red', label='Anomaly', s=50)
+plt.title('Anomalies in Transactions')
+plt.xlabel('Credit')
+plt.ylabel('Debit')
+plt.legend()
+plt.show()
 
-    # Plot the heatmap
-    fig, ax = plt.subplots(figsize=(10, 6))
-    heatmap_data = transaction_intensity.set_index('Region')[['Total Transactions']]
-    sns.heatmap(
-        heatmap_data,
-        annot=True,
-        fmt='.2f',
-        cmap='YlGnBu',
-        cbar_kws={'label': 'Transaction Intensity'},
-        ax=ax,
-    )
-    ax.set_title("Geographic Heatmap of Transaction Intensity by Region")
-    st.pyplot(fig)
+plt.figure(figsize=(12, 8))
+sns.boxplot(data=data.melt(id_vars=['Account Type'], value_vars=['Credit', 'Debit']),
+            x='Account Type', y='value', hue='variable')
+plt.yscale('log')
+plt.title('Comparative Analysis of Credit and Debit Transactions by Account Type')
+plt.ylabel('Transaction Amount (log scale)')
+plt.xlabel('Account Type')
+plt.legend(title='Transaction Type')
+plt.tight_layout()
+plt.show()
 
-elif options == "Anomalies in Transactions":
-    st.header("Anomalies in Transactions")
-    # Calculate Z-scores and identify outliers
-    df['Credit Z-Score'] = zscore(df['Credit'])
-    df['Debit Z-Score'] = zscore(df['Debit'])
-    outliers = df[(df['Credit Z-Score'].abs() > 3) | (df['Debit Z-Score'].abs() > 3)]
-
-    # Plot anomalies
-    fig, ax = plt.subplots(figsize=(12, 6))
-    ax.scatter(df.index, df['Credit'], label='Credit', alpha=0.5)
-    ax.scatter(df.index, df['Debit'], label='Debit', alpha=0.5)
-    ax.scatter(outliers.index, outliers['Credit'], color='red', label='Credit Outliers', edgecolor='k')
-    ax.scatter(outliers.index, outliers['Debit'], color='orange', label='Debit Outliers', edgecolor='k')
-    ax.set_title("Anomalies in Credit and Debit Transactions")
-    ax.set_xlabel("Transaction Index")
-    ax.set_ylabel("Transaction Amount")
-    ax.legend()
-    st.pyplot(fig)
-
-elif options == "Comparative Analysis of Transaction Types":
-    st.header("Comparative Analysis of Transaction Types")
-    # Melt the data for visualization
-    melted_df = df.melt(
-        id_vars=['Account Type'], value_vars=['Credit', 'Debit'],
-        var_name='Transaction Type', value_name='Amount'
-    )
-
-    # Plot the boxplot
-    fig, ax = plt.subplots(figsize=(12, 6))
-    sns.boxplot(data=melted_df, x='Account Type', y='Amount', hue='Transaction Type', ax=ax)
-    ax.set_yscale('log')
-    ax.set_title("Comparative Analysis of Credit and Debit Transactions by Account Type")
-    ax.set_xlabel("Account Type")
-    ax.set_ylabel("Transaction Amount (log scale)")
-    ax.legend(title="Transaction Type")
-    st.pyplot(fig)
-
-st.sidebar.info("Use the navigation panel to explore different visualizations.")
